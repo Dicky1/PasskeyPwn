@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Runtime output (default locations)
+/results/
+/baseline.json
+*.sarif
+passkeypwn-report.*
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS / tooling
+.DS_Store
+.idea/
+.vscode/
+.claude/
+*.swp
+
+# Scratch / temp
+_*.ts
+tmp/

@@ -1,0 +1,209 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:940px;margin:32px auto;padding:0 24px;color:#1b2430;background:#fff}
+  h1{font-size:26px;border-bottom:2px solid #e2e8f0;padding-bottom:10px}
+  h2{font-size:19px;margin-top:26px;color:#2d3748}
+  h3{font-size:15px;margin-top:18px}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;margin:12px 0}
+  th,td{border:1px solid #cbd5e1;padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#f1f5f9}
+  code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px}
+  pre{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:6px;font-size:11.5px;overflow-x:auto}
+  blockquote{border-left:4px solid #3b82f6;margin:10px 0;padding:6px 14px;background:#f8fafc;color:#334155}
+  hr{border:none;border-top:1px solid #e2e8f0;margin:16px 0}
+  li{line-height:1.5} p{line-height:1.5}
+</style></head><body><h1>PasskeyPwn — Security Test Report</h1>
+
+<p><strong>Target:</strong> http://localhost:8099</p>
+<p><strong>Start:</strong> 2026-10-24T12:30:52.759Z</p>
+<p><strong>End:</strong> 2026-10-24T12:32:32.561Z</p>
+<p><strong>Findings:</strong> 8</p>
+
+<hr>
+
+<h2>Summary</h2>
+
+<table><thead><tr><th>Severity</th><th>Count</th></tr></thead><tbody>
+<tr><td>🔴 Error (High)</td><td>2</td></tr>
+<tr><td>🟡 Warning (Medium)</td><td>5</td></tr>
+<tr><td>🔵 Note (Low)</td><td>1</td></tr>
+</tbody></table>
+
+<h2>Test Matrix</h2>
+
+<table><thead><tr><th>#</th><th>Module</th><th>Ceremony</th><th>Verdict</th><th>HTTP</th><th>Server response</th></tr></thead><tbody>
+<tr><td>1</td><td><code>enum</code></td><td>authenticate</td><td>🔴 FINDING</td><td>200</td><td>Enumeration signal: response bodies differ in size (known=218B, absent=146B).</td></tr>
+<tr><td>2</td><td><code>rogue-persist</code></td><td>register</td><td>🔴 FINDING</td><td>200</td><td>{"verified":true}</td></tr>
+<tr><td>3</td><td><code>downgrade</code></td><td>register</td><td>🔴 FINDING</td><td>200</td><td>{"verified":true}</td></tr>
+<tr><td>4</td><td><code>recovery</code></td><td>authenticate</td><td>✅ rejected (secure)</td><td>—</td><td>No weaker fallback detected on the login page (heuristic).</td></tr>
+<tr><td>5</td><td><code>origin</code></td><td>authenticate</td><td>🔴 FINDING</td><td>200</td><td>{"verified":true}</td></tr>
+<tr><td>6</td><td><code>challenge</code></td><td>authenticate</td><td>🔴 FINDING</td><td>200</td><td>{"verified":true}</td></tr>
+<tr><td>7</td><td><code>counter</code></td><td>authenticate</td><td>🔴 FINDING</td><td>200</td><td>{"verified":true}</td></tr>
+<tr><td>8</td><td><code>flags</code></td><td>authenticate</td><td>🔴 FINDING</td><td>200</td><td>{"verified":true}</td></tr>
+<tr><td>9</td><td><code>attestation</code></td><td>register</td><td>🔴 FINDING</td><td>200</td><td>{"verified":true}</td></tr>
+<tr><td>10</td><td><code>credid</code></td><td>authenticate</td><td>✅ rejected (secure)</td><td>400</td><td>{"error":"Unrecognized credential ID"}</td></tr>
+</tbody></table>
+
+<blockquote>A "rejected (secure)" verdict means the relying party correctly refused the mutated ceremony. A "FINDING" means it accepted something it should have rejected.</blockquote>
+
+<h2>Findings</h2>
+
+<h3>🟡 1. Account enumeration via authentication flow</h3>
+
+<li><strong>Rule ID:</strong> <code>exploit.enum.user-existence</code></li>
+<li><strong>Severity:</strong> warning</li>
+<li><strong>Category:</strong> account-enumeration</li>
+<li><strong>Endpoint:</strong> <code>http://localhost:8099</code></li>
+
+<p>The authentication options response differs between an existing and a non-existing username, allowing an attacker to enumerate valid accounts. A hardened RP returns a uniform response (same status, shape, and timing) regardless of whether the user exists.</p>
+
+<p><strong>Payload:</strong></p>
+<pre>known="ppwn_enum_known_1792845121307" vs absent="ppwn_enum_absent_1792845121307_zzz"</pre>
+
+<p><strong>Server Response:</strong></p>
+<pre>Enumeration signal: response bodies differ in size (known=218B, absent=146B).
+
+[known]
+{"challenge":"MMF4E0CzE44leYotQ2BuL8EPU_prdTDiXamMfweFaHY","rpId":"localhost","timeout":60000,"userVerification":"required","allowCredentials":[{"type":"public-key","id":"oKW5oTPmWjURqqVEYXyyHttCRuwWi16YszxMudL1jhY"}]}
+
+[absent]
+{"challenge":"x3VBIWp04UWUzAU5qv8Mk0Q5MLYfs8tfTBcnjnXpcLM","rpId":"localhost","timeout":60000,"userVerification":"required","allowCredentials":[]}</pre>
+
+<p><strong>HTTP Status:</strong> 200</p>
+
+<hr>
+
+<h3>🔴 2. Additional credential added without re-authentication</h3>
+
+<li><strong>Rule ID:</strong> <code>exploit.rogue-persist.add-credential</code></li>
+<li><strong>Severity:</strong> error</li>
+<li><strong>Category:</strong> rogue-persistence</li>
+<li><strong>Endpoint:</strong> <code>http://localhost:8099</code></li>
+
+<p>A second credential was registered to an existing account within the same session without any step-up re-authentication. An attacker with temporary session access can register their own authenticator and retain persistent access even after the password is changed or sessions are revoked. A hardened RP requires fresh user verification before enrolling a new credential and notifies the user.</p>
+
+<p><strong>Payload:</strong></p>
+<pre>account="ppwn_persist_1792845127977", 2nd credential enrolled in-session</pre>
+
+<p><strong>Server Response:</strong></p>
+<pre>{"verified":true}</pre>
+
+<p><strong>HTTP Status:</strong> 200</p>
+
+<hr>
+
+<h3>🔵 3. User-verification assurance downgrade at registration</h3>
+
+<li><strong>Rule ID:</strong> <code>exploit.downgrade.uv-not-performed</code></li>
+<li><strong>Severity:</strong> note</li>
+<li><strong>Category:</strong> downgrade</li>
+<li><strong>Endpoint:</strong> <code>http://localhost:8099</code></li>
+
+<p>Registration completed with the UV (User Verified) flag cleared although the RP policy requested userVerification=required. Accepting a credential enrolled without user verification downgrades the assurance level the RP believes it has, weakening every later authentication with that credential.</p>
+
+<p><strong>Payload:</strong></p>
+<pre>flags=0x41 (UV cleared, AT set)</pre>
+
+<p><strong>Server Response:</strong></p>
+<pre>{"verified":true}</pre>
+
+<p><strong>HTTP Status:</strong> 200</p>
+
+<hr>
+
+<h3>🔴 4. Cross-origin clientDataJSON accepted</h3>
+
+<li><strong>Rule ID:</strong> <code>fuzz.origin.cross-origin</code></li>
+<li><strong>Severity:</strong> error</li>
+<li><strong>Category:</strong> origin-spoofing</li>
+<li><strong>Endpoint:</strong> <code>http://localhost:8099/authentication/verification</code></li>
+
+<p>The assertion was sent with clientDataJSON.origin set to an attacker-controlled origin. A compliant RP MUST reject an assertion whose origin does not match an expected origin (WebAuthn §7.2 step 13).</p>
+
+<p><strong>Payload:</strong></p>
+<pre>origin="https://passkeypwn-cross-origin.example"</pre>
+
+<p><strong>Server Response:</strong></p>
+<pre>{"verified":true}</pre>
+
+<p><strong>HTTP Status:</strong> 200</p>
+
+<hr>
+
+<h3>🟡 5. Mismatched challenge accepted (replay)</h3>
+
+<li><strong>Rule ID:</strong> <code>fuzz.challenge.static</code></li>
+<li><strong>Severity:</strong> warning</li>
+<li><strong>Category:</strong> challenge-replay</li>
+<li><strong>Endpoint:</strong> <code>http://localhost:8099/authentication/verification</code></li>
+
+<p>The assertion carried a fixed challenge that the server never issued. A compliant RP MUST verify clientDataJSON.challenge equals the challenge it generated (WebAuthn §7.2 step 11). Acceptance indicates the challenge is not bound, enabling replay.</p>
+
+<p><strong>Payload:</strong></p>
+<pre>challenge="QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE"</pre>
+
+<p><strong>Server Response:</strong></p>
+<pre>{"verified":true}</pre>
+
+<p><strong>HTTP Status:</strong> 200</p>
+
+<hr>
+
+<h3>🟡 6. Signature counter regression accepted</h3>
+
+<li><strong>Rule ID:</strong> <code>fuzz.counter.regression</code></li>
+<li><strong>Severity:</strong> warning</li>
+<li><strong>Category:</strong> counter-manipulation</li>
+<li><strong>Endpoint:</strong> <code>http://localhost:8099/authentication/verification</code></li>
+
+<p>The assertion reported signCount=0 after a higher count had been established. An RP that stores signature counts SHOULD treat a non-increasing counter as a sign of a cloned authenticator (WebAuthn §7.2 step 21). Silent acceptance means cloned-credential detection is not in effect.</p>
+
+<p><strong>Payload:</strong></p>
+<pre>signCount=0 (regressed)</pre>
+
+<p><strong>Server Response:</strong></p>
+<pre>{"verified":true}</pre>
+
+<p><strong>HTTP Status:</strong> 200</p>
+
+<hr>
+
+<h3>🟡 7. Cleared User-Verified flag accepted</h3>
+
+<li><strong>Rule ID:</strong> <code>fuzz.flags.uv-cleared</code></li>
+<li><strong>Severity:</strong> warning</li>
+<li><strong>Category:</strong> flag-manipulation</li>
+<li><strong>Endpoint:</strong> <code>http://localhost:8099/authentication/verification</code></li>
+
+<p>The assertion was sent with the UV (User Verified) flag bit cleared while the RP requested userVerification=required. A compliant RP MUST verify the UV bit is set when it requires user verification (WebAuthn §7.2 step 17). </p>
+
+<p><strong>Payload:</strong></p>
+<pre>flags=0x01 (UP only, UV cleared)</pre>
+
+<p><strong>Server Response:</strong></p>
+<pre>{"verified":true}</pre>
+
+<p><strong>HTTP Status:</strong> 200</p>
+
+<hr>
+
+<h3>🟡 8. "none" attestation accepted where attestation was requested</h3>
+
+<li><strong>Rule ID:</strong> <code>fuzz.attestation.none-substituted</code></li>
+<li><strong>Severity:</strong> warning</li>
+<li><strong>Category:</strong> attestation-bypass</li>
+<li><strong>Endpoint:</strong> <code>http://localhost:8099</code></li>
+
+<p>Registration was completed with fmt="none" and a zero AAGUID although the RP requested a non-none attestation. If the RP relies on attestation for authenticator provenance, it MUST validate the attestation statement rather than accept "none".</p>
+
+<p><strong>Payload:</strong></p>
+<pre>attestationObject fmt="none", aaguid=00..00</pre>
+
+<p><strong>Server Response:</strong></p>
+<pre>{"verified":true}</pre>
+
+<p><strong>HTTP Status:</strong> 200</p>
+
+<hr>
+
+
+<p>*Generated by PasskeyPwn v1.0.0*</p></body></html>

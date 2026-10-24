@@ -1,0 +1,40 @@
+{
+  "name": "passkeypwn",
+  "version": "1.0.0",
+  "description": "Black-box offensive tester for WebAuthn/Passkey implementations",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "passkeypwn": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "recon": "tsx src/cli.ts recon",
+    "test": "tsx src/cli.ts --help",
+    "test:recon": "tsx src/cli.ts recon --url-register https://webauthn.io --url-login https://webauthn.io --no-headless"
+  },
+  "keywords": [
+    "webauthn",
+    "passkey",
+    "security",
+    "pentest",
+    "fido2"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cbor-x": "^1.6.6",
+    "commander": "^15.0.0",
+    "playwright": "^1.64.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

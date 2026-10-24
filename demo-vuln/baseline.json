@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "tool": "PasskeyPwn",
+    "version": "1.0.0",
+    "timestamp": "2026-10-24T12:16:54.906Z",
+    "targetUrlRegister": "http://localhost:8099",
+    "targetUrlLogin": "http://localhost:8099",
+    "username": "ppwn_recon_1792844214905"
+  },
+  "registration": {
+    "publicKeyOptions": null,
+    "response": {
+      "statusCode": null,
+      "body": null,
+      "classification": null
+    },
+    "credential": {
+      "credentialId": "ErxtXzS004iJ3y3NArwXgUU+7uxssZKaGD2ElE05/Wo=",
+      "publicKeyAlgorithm": null,
+      "transports": []
+    }
+  },
+  "authentication": {
+    "publicKeyOptions": null,
+    "response": {
+      "statusCode": null,
+      "body": null,
+      "classification": null
+    }
+  },
+  "analysis": {
+    "rpId": "localhost",
+    "rpName": "PasskeyPwn Vulnerable RP",
+    "supportedAlgorithms": [-7],
+    "attestationPreference": "direct",
+    "userVerificationRequirement": "required",
+    "residentKeyRequirement": "preferred",
+    "challengeEntropyBits": null,
+    "timeoutMs": null,
+    "observations": [
+      "⚠️  RP ID not specified — browser will default to current origin hostname",
+      "⚠️  Registration result: UNKNOWN",
+      "⚠️  Authentication result: UNKNOWN"
+    ]
+  }
+}

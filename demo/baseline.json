@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "tool": "PasskeyPwn",
+    "version": "1.0.0",
+    "timestamp": "2026-10-24T11:44:43.765Z",
+    "targetUrlRegister": "https://webauthn.io",
+    "targetUrlLogin": "https://webauthn.io",
+    "username": "ppwn_recon_1792842283765"
+  },
+  "registration": {
+    "publicKeyOptions": null,
+    "response": {
+      "statusCode": null,
+      "body": null,
+      "classification": null
+    },
+    "credential": {
+      "credentialId": "aJfHP7/TBxiH8yH5sovDrAICQooaimOaYhFGcnp4K8k=",
+      "publicKeyAlgorithm": null,
+      "transports": []
+    }
+  },
+  "authentication": {
+    "publicKeyOptions": null,
+    "response": {
+      "statusCode": null,
+      "body": null,
+      "classification": null
+    }
+  },
+  "analysis": {
+    "rpId": null,
+    "rpName": null,
+    "supportedAlgorithms": [],
+    "attestationPreference": null,
+    "userVerificationRequirement": null,
+    "residentKeyRequirement": null,
+    "challengeEntropyBits": null,
+    "timeoutMs": null,
+    "observations": [
+      "⚠️  RP ID not specified — browser will default to current origin hostname",
+      "⚠️  Registration result: UNKNOWN",
+      "⚠️  Authentication result: UNKNOWN"
+    ]
+  }
+}
