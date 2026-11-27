@@ -1,39 +1,38 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/PasskeyPwn-v1.0.0-7c3aed?style=for-the-badge&logo=shield&logoColor=white" alt="PasskeyPwn v1.0.0"/>
-  <img src="https://img.shields.io/badge/Node-%E2%89%A520-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node >=20"/>
-  <img src="https://img.shields.io/badge/TypeScript-5.x-3178c6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript 5"/>
-  <img src="https://img.shields.io/badge/License-ISC-blue?style=for-the-badge" alt="ISC License"/>
-</p>
-
-<h1 align="center">
-  <img src="https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/shield-check.svg" width="36" height="36" alt="shield"/>
-  PasskeyPwn
-</h1>
-
-<p align="center">
-  <b>A black-box offensive conformance tester for WebAuthn / Passkey relying parties.</b><br/>
-  <sub>Drives a real browser with a fully-controllable <i>shadow authenticator</i> and replays mutated WebAuthn ceremonies over HTTP to check whether the <b>server</b> correctly <i>rejects</i> malformed or forged ceremonies.</sub>
-</p>
-
-<p align="center">
-  <a href="#usage"><img src="https://img.shields.io/badge/Get%20Started-Usage-7c3aed?style=flat-square" alt="Usage"/></a>
-  <a href="#modules"><img src="https://img.shields.io/badge/Modules-12%2B-blue?style=flat-square" alt="Modules"/></a>
-  <a href="#output"><img src="https://img.shields.io/badge/Output-SARIF%20%7C%20Markdown%20%7C%20HTML-green?style=flat-square" alt="Output"/></a>
-</p>
+<div align="center">
+  <pre aria-hidden="true">╭───╮
+│ ◉ ╰━━━━┳━━┓
+╰───╯    ╹  ╹</pre>
+  <h1>PasskeyPwn</h1>
+  <p><strong>Black-box security testing for WebAuthn relying parties</strong></p>
+  <p>Record a passkey baseline, evaluate server-side validation, and turn saved results into a report.</p>
+  <p>
+    <img src="https://img.shields.io/badge/Node-%E2%89%A520-339933?style=flat-square&amp;logo=node.js&amp;logoColor=white" alt="Node.js 20 or later"/>
+    <img src="https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript"/>
+    <img src="https://img.shields.io/badge/License-ISC-7c3aed?style=flat-square" alt="ISC license"/>
+  </p>
+  <p>
+    <a href="#install">Install</a> ·
+    <a href="#usage">Usage</a> ·
+    <a href="#modules">Modules</a> ·
+    <a href="#output">Report preview</a> ·
+    <a href="#limitations">Limitations</a>
+  </p>
+</div>
 
 ---
 
-> ⚠️ **Authorized use only.** Run PasskeyPwn only against systems you own or are explicitly permitted to test (your own apps, a lab, or an in-scope bug-bounty target). WebAuthn is a defensive technology; this tool exists to help you verify your own relying-party implementation. You are responsible for how you use it.
+> [!IMPORTANT]
+> Use PasskeyPwn only against systems you own or have explicit permission to test.
 
 ---
 
-## ✨ Highlights
+## Workflow at a glance
 
-- 🕵️ **Shadow authenticator** — full override of `navigator.credentials.create/get`; every byte of `authenticatorData`, `clientDataJSON`, attestation object and signature is built & signed in Node.
-- 🔁 **Capture-replay (`--mode replay`)** — captures one real ceremony (options + finish HTTP calls incl. cookies/CSRF), then for each mutation **rebuilds & re-signs** and replays the finish request over HTTP.
-- 🎯 **Target-agnostic** — a structural field locator finds `clientDataJSON` / `authenticatorData` / `signature` / `credentialId` inside *any* JSON envelope.
-- 🧬 **12+ mutation modules** covering origin, challenge, counter, flags, attestation, credential binding, rpId scoping, BE/BS, clientDataJSON edge cases.
-- 📄 **Reports** in SARIF, Markdown and HTML, with PoC `curl` commands.
+| Stage | What it produces |
+| --- | --- |
+| `recon` | A `baseline.json` file with the observed registration and authentication configuration |
+| `fuzz` and `exploit` | Run files with case verdicts, findings, and available evidence |
+| `report` | An HTML, Markdown, or SARIF report from saved run files |
 
 ---
 
@@ -123,7 +122,19 @@ Global options: `--proxy http://127.0.0.1:8080` (route through Burp), `--no-head
 
 ## Output
 
-Reports include a severity summary, a **full test matrix** (every case + verdict + the server's response), and detailed findings with rule IDs, categories, payloads, and HTTP evidence. SARIF output drops into CI / code-scanning dashboards. PoC `curl` commands are printed for each finding.
+| Format | What you get |
+| --- | --- |
+| **HTML** | A standalone report with a severity summary, test matrix, and finding details |
+| **Markdown** | A text report with the test matrix and finding details for review or writeups |
+| **SARIF** | Structured findings for CI and code-scanning tools |
+
+<p align="center">
+  <a href="demo-vuln/screenshots/08-report.png">
+    <img src="demo-vuln/screenshots/08-report.png" width="880" alt="PasskeyPwn report showing a severity summary and test results from the local testbed"/>
+  </a>
+</p>
+
+[Browse the sample Markdown report](demo-vuln/report.md).
 
 ---
 
@@ -138,9 +149,7 @@ npx tsx testbed/vulnerable-rp.ts          # http://localhost:8099
 
 > ⚠️ **Never deploy the testbed.** It is broken on purpose.
 
-**Example outcomes (reproducible):**
-- Against **webauthn.io** (FIDO reference implementation): **0 findings** — every mutation is correctly rejected. This demonstrates the tool does not cry wolf.
-- Against the **vulnerable testbed**: **8 findings** (5 fuzz + 3 exploit), with `credid` and `recovery` correctly reported as *not* vulnerable — the tool distinguishes real weaknesses from properly-enforced checks.
+The checked-in [demo report](demo-vuln/report.md) records **8 findings across 10 cases** from the local testbed. Those counts describe the saved demo run.
 
 ---
 
@@ -167,7 +176,7 @@ testbed/vulnerable-rp.ts     intentionally insecure RP for testing
 
 ---
 
-## Limitations (honest)
+## Limitations
 
 - Replay currently supports JSON `finish` endpoints; form-encoded / non-JSON envelopes fall back to browser mode or are unsupported.
 - `attestation` is exercised in browser mode (registration ceremony), not via replay.
