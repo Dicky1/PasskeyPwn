@@ -1,10 +1,6 @@
 <div align="center">
-  <pre aria-hidden="true">╭───╮
-│ ◉ ╰━━━━┳━━┓
-╰───╯    ╹  ╹</pre>
   <h1>PasskeyPwn</h1>
   <p><strong>Black-box security testing for WebAuthn relying parties</strong></p>
-  <p>Record a passkey baseline, evaluate server-side validation, and turn saved results into a report.</p>
   <p>
     <img src="https://img.shields.io/badge/Node-%E2%89%A520-339933?style=flat-square&amp;logo=node.js&amp;logoColor=white" alt="Node.js 20 or later"/>
     <img src="https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript"/>
