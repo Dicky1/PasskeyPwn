@@ -12,10 +12,11 @@
  */
 
 import { Page, Request } from 'playwright';
-import { buildAuthenticatorData, buildClientDataJSON } from './cbor-builder.js';
-import { KeyPairES256, signAssertion } from './signer.js';
+import { buildAuthenticatorData, buildClientDataJSON, sha256 } from './cbor-builder.js';
+import { AnyKeyPair, KeyPairES256, signAssertion, signRS256, signEdDSA } from './signer.js';
 import {
   locateWebAuthnFields,
+  locateAllCredentialIds,
   getAtPath,
   setAtPath,
   encodeAs,
@@ -47,18 +48,29 @@ export interface CeremonyTranscript {
 export interface AssertionOverrides {
   rpId?: string;
   origin?: string;
-  /** base64url challenge; when omitted a fresh one is fetched from the options endpoint. */
   challenge?: string;
   flags?: number;
   signCount?: number;
   credentialId?: Buffer;
   userHandle?: Buffer;
+  clientDataType?: string;
+  crossOrigin?: boolean;
+  duplicateChallenge?: string;
+  trailingBytes?: Buffer;
+}
+
+export interface PocRequest {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: string | null;
 }
 
 export interface ReplayResult {
   classification: 'ACCEPTED' | 'REJECTED' | 'ERROR' | 'UNKNOWN';
   statusCode: number | null;
   body: string | null;
+  request?: CapturedRequest;
 }
 
 /**
@@ -218,7 +230,7 @@ async function establishSession(
  */
 export async function replayAssertion(
   transcript: CeremonyTranscript,
-  keyPair: KeyPairES256,
+  keyPair: AnyKeyPair,
   baseCredentialId: Buffer,
   overrides: AssertionOverrides,
 ): Promise<ReplayResult> {
@@ -251,14 +263,9 @@ export async function replayAssertion(
   const signCount = overrides.signCount ?? 0;
   const credentialId = overrides.credentialId ?? baseCredentialId;
 
-  // Start from the captured session cookies, then establish a fresh session so
-  // the server has a stored challenge bound to this cookie jar.
   const jar = parseCookieHeader(headerGet(finish.headers, 'cookie'));
   const realChallenge = await establishSession(transcript, jar);
 
-  // Default: echo the server's fresh challenge. The challenge mutation overrides
-  // it with a wrong value, but the session is still valid so the server reaches
-  // the challenge-comparison step (and should reject).
   const challengeB64Url = overrides.challenge ?? realChallenge;
   if (!challengeB64Url) {
     return {
@@ -269,14 +276,37 @@ export async function replayAssertion(
   }
 
   const authData = buildAuthenticatorData({ rpId, flags, signCount });
-  const clientDataJSON = buildClientDataJSON({ type: 'webauthn.get', challenge: challengeB64Url, origin });
-  const signature = signAssertion(keyPair, authData, clientDataJSON);
+  const clientDataJSON = buildClientDataJSON({
+    type: overrides.clientDataType ?? 'webauthn.get',
+    challenge: challengeB64Url,
+    origin,
+    crossOrigin: overrides.crossOrigin,
+    duplicateChallenge: overrides.duplicateChallenge,
+    trailingBytes: overrides.trailingBytes,
+  });
+
+  let signature: Buffer;
+  if (keyPair.alg === 'RS256') {
+    const r = keyPair as any;
+    signature = signRS256(r.privateKey, Buffer.concat([authData, sha256(clientDataJSON)]));
+  } else if (keyPair.alg === 'EdDSA') {
+    const e = keyPair as any;
+    signature = signEdDSA(e.privateKey, Buffer.concat([authData, sha256(clientDataJSON)]));
+  } else {
+    signature = signAssertion(keyPair as KeyPairES256, authData, clientDataJSON);
+  }
 
   // Splice rebuilt components back into the envelope, preserving each field's encoding.
   setAtPath(json, fields.clientDataJSON.path, encodeAs(clientDataJSON, fields.clientDataJSON.encoding));
   setAtPath(json, fields.authenticatorData.path, encodeAs(authData, fields.authenticatorData.encoding));
   setAtPath(json, fields.signature.path, encodeAs(signature, fields.signature.encoding));
-  if (fields.credentialId) {
+  // Replace ALL credential-id fields (id / rawId / credentialId / keyId) so RPs
+  // that read rawId (not id) are covered too.
+  const allCredIds = locateAllCredentialIds(json);
+  for (const cid of allCredIds) {
+    setAtPath(json, cid.path, encodeAs(credentialId, cid.encoding));
+  }
+  if (allCredIds.length === 0 && fields.credentialId) {
     setAtPath(json, fields.credentialId.path, encodeAs(credentialId, fields.credentialId.encoding));
   }
   if (fields.userHandle && overrides.userHandle) {
@@ -290,8 +320,8 @@ export async function replayAssertion(
       body: JSON.stringify(json),
     });
     const body = await resp.text().catch(() => null);
-    return { classification: classify(resp.status), statusCode: resp.status, body };
-  } catch (err) {
+    const poc: CapturedRequest = { url: finish.url, method: finish.method, headers: sanitizeHeaders(finish.headers), body: JSON.stringify(json) };
+    return { classification: classify(resp.status), statusCode: resp.status, body, request: poc };  } catch (err) {
     return {
       classification: 'ERROR',
       statusCode: null,

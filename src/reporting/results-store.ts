@@ -36,6 +36,25 @@ export interface CaseResult {
   responseExcerpt: string | null;
   payload: string | null;
   endpoint: string;
+  poc?: PocRequest;
+}
+
+export interface PocRequest {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: string | null;
+}
+
+export function buildCurl(poc: PocRequest): string {
+  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+  const lines = [`curl -i -X ${poc.method} ${q(poc.url)}`];
+  for (const [k, v] of Object.entries(poc.headers)) {
+    if (k.toLowerCase() === 'content-length') continue;
+    lines.push(`  -H ${q(`${k}: ${v}`)}`);
+  }
+  if (poc.body != null) lines.push(`  --data-raw ${q(poc.body)}`);
+  return lines.join(' \\\n');
 }
 
 export interface RunResult {

@@ -8,20 +8,20 @@
 
 import { Command } from 'commander';
 import { resolve } from 'node:path';
-import { loadRunResults } from '../reporting/results-store.js';
+import { loadRunResults, buildCurl, PocRequest } from '../reporting/results-store.js';
 import { SarifFinding, SarifReport, writeSarifReport } from '../reporting/sarif-writer.js';
 import { writeMarkdownReport, TestMatrixRow } from '../reporting/markdown-writer.js';
+import { writeHtmlReport } from '../reporting/html-writer.js';
 
 export function createReportCommand(): Command {
   const cmd = new Command('report')
     .description('Generate a SARIF or Markdown report from saved test results')
-    .requiredOption('--format <format>', 'Output format: sarif or md')
-    .option('--out <path>', 'Output file path (default: ./passkeypwn-report.<ext>)')
+    .requiredOption('--format <format>', 'Output format: sarif, md, or html')    .option('--out <path>', 'Output file path (default: ./passkeypwn-report.<ext>)')
     .option('--results <dir>', 'Results directory to read (default: ./results/)')
     .action(async (options) => {
       const format = String(options.format).toLowerCase();
-      if (format !== 'sarif' && format !== 'md') {
-        console.error(`[report] Unknown format "${options.format}". Use "sarif" or "md".`);
+      if (format !== 'sarif' && format !== 'md' && format !== 'html') {
+        console.error(`[report] Unknown format "${options.format}". Use "sarif", "md", or "html".`);
         process.exit(1);
       }
 
@@ -66,6 +66,7 @@ export function createReportCommand(): Command {
             responseExcerpt: c.responseExcerpt ?? undefined,
             payload: c.payload ?? undefined,
             category: c.category,
+            ...(c.poc ? { poc: c.poc } : {}),
           });
         }
       }
@@ -77,16 +78,21 @@ export function createReportCommand(): Command {
         endTime: new Date().toISOString(),
       };
 
-      const ext = format === 'sarif' ? 'sarif' : 'md';
+      const ext = format === 'sarif' ? 'sarif' : format === 'html' ? 'html' : 'md';
       const outPath = resolve(options.out ?? `./passkeypwn-report.${ext}`);
 
       if (format === 'sarif') {
         writeSarifReport(report, outPath);
+      } else if (format === 'html') {
+        writeHtmlReport(report, outPath, matrix);
       } else {
         writeMarkdownReport(report, outPath, matrix);
       }
 
       const totalCases = runs.reduce((n, r) => n + r.cases.length, 0);
+      for (const c of runs.flatMap((r) => r.cases)) {
+        if (c.isFinding && c.poc) console.log(`\\n# PoC (${c.id})\\n${buildCurl(c.poc)}`);
+      }
       console.log(
         `[report] ${findings.length} finding(s) across ${totalCases} test case(s) from ${runs.length} run(s).`,
       );

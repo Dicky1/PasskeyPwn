@@ -7,19 +7,67 @@
  * ES256 (COSE alg -7), which is all this tool needs.
  */
 
-import { generateKeyPairSync, createSign, KeyObject } from 'node:crypto';
+import { generateKeyPairSync, createSign, KeyObject, sign as cryptoSign } from 'node:crypto';
 import { sha256 } from './cbor-builder.js';
 
 export interface KeyPairES256 {
   alg: 'ES256';
   privateKey: KeyObject;
   publicKey: KeyObject;
-  /** Raw uncompressed public key (65 bytes: 0x04 || x || y) */
   publicKeyRaw: Buffer;
-  /** x coordinate (32 bytes) */
   x: Buffer;
-  /** y coordinate (32 bytes) */
   y: Buffer;
+}
+
+export interface KeyPairRS256 {
+  alg: 'RS256';
+  privateKey: KeyObject;
+  publicKey: KeyObject;
+  publicKeySpki: Buffer;
+  /** RSA modulus */
+  n: Buffer;
+  /** RSA public exponent */
+  e: Buffer;
+}
+
+export interface KeyPairEdDSA {
+  alg: 'EdDSA';
+  privateKey: KeyObject;
+  publicKey: KeyObject;
+  /** Raw 32-byte Ed25519 public key */
+  publicKeyRaw: Buffer;
+}
+
+export type AnyKeyPair = KeyPairES256 | KeyPairRS256 | KeyPairEdDSA;
+
+export function generateRS256KeyPair(): KeyPairRS256 {
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+  });
+  const publicKeySpki = publicKey.export({ type: 'spki', format: 'der' }) as Buffer;
+  const jwk = publicKey.export({ format: 'jwk' }) as { n: string; e: string };
+  const n = Buffer.from(jwk.n!, 'base64url');
+  const e = Buffer.from(jwk.e!, 'base64url');
+  return { alg: 'RS256', privateKey, publicKey, publicKeySpki: Buffer.from(publicKeySpki), n, e };
+}
+
+export function generateEdDSAKeyPair(): KeyPairEdDSA {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const pubDer = publicKey.export({ type: 'spki', format: 'der' }) as Buffer;
+  // Last 32 bytes are the raw Ed25519 public key
+  const raw = pubDer.subarray(pubDer.length - 32);
+  return { alg: 'EdDSA', privateKey, publicKey, publicKeyRaw: Buffer.from(raw) };
+}
+
+export function signRS256(privateKey: KeyObject, data: Buffer): Buffer {
+  const sign = createSign('RSA-SHA256');
+  sign.update(data);
+  return sign.sign(privateKey);
+}
+
+export function signEdDSA(privateKey: KeyObject, data: Buffer): Buffer {
+  // Ed25519 signs the raw message (no hash).
+  return cryptoSign(null, data, privateKey);
 }
 
 /**

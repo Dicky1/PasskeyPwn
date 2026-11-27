@@ -26,6 +26,7 @@ export function createFuzzCommand(): Command {
     )
     .option('--out <dir>', 'Results directory (default: ./results/)')
     .option('--screenshots <dir>', 'Capture screenshots of the replay capture phase into this directory')
+    .option('--from-har <path>', 'Import a HAR/Burp export and replay its WebAuthn ceremony instead of driving the browser')
     .option('--no-headless', 'Run browser in visible mode')
     .option('--proxy <url>', 'Route browser traffic through a proxy (e.g., http://127.0.0.1:8080)')
     .option('--slow-mo <ms>', 'Slow down browser actions by N ms', parseInt)

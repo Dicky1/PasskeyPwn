@@ -1,16 +1,43 @@
-# PasskeyPwn
+<p align="center">
+  <img src="https://img.shields.io/badge/PasskeyPwn-v1.0.0-7c3aed?style=for-the-badge&logo=shield&logoColor=white" alt="PasskeyPwn v1.0.0"/>
+  <img src="https://img.shields.io/badge/Node-%E2%89%A520-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node >=20"/>
+  <img src="https://img.shields.io/badge/TypeScript-5.x-3178c6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript 5"/>
+  <img src="https://img.shields.io/badge/License-ISC-blue?style=for-the-badge" alt="ISC License"/>
+</p>
 
-**A black-box offensive conformance tester for WebAuthn / Passkey relying parties.**
+<h1 align="center">
+  <img src="https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/shield-check.svg" width="36" height="36" alt="shield"/>
+  PasskeyPwn
+</h1>
 
-PasskeyPwn drives a real browser with a fully-controllable "shadow authenticator" and replays mutated WebAuthn ceremonies over HTTP to check whether a **relying party (the server)** correctly *rejects* malformed or forged ceremonies. It is a testing tool for the server side of WebAuthn — not an attack on authenticators or on correctly-implemented sites.
+<p align="center">
+  <b>A black-box offensive conformance tester for WebAuthn / Passkey relying parties.</b><br/>
+  <sub>Drives a real browser with a fully-controllable <i>shadow authenticator</i> and replays mutated WebAuthn ceremonies over HTTP to check whether the <b>server</b> correctly <i>rejects</i> malformed or forged ceremonies.</sub>
+</p>
 
-> ⚠️ **Authorized use only.** Run PasskeyPwn only against systems you own or are explicitly permitted to test (e.g. your own apps, a lab, or an in-scope bug-bounty target). WebAuthn is a defensive technology; this tool exists to help you verify your own relying-party implementation. You are responsible for how you use it.
+<p align="center">
+  <a href="#usage"><img src="https://img.shields.io/badge/Get%20Started-Usage-7c3aed?style=flat-square" alt="Usage"/></a>
+  <a href="#modules"><img src="https://img.shields.io/badge/Modules-12%2B-blue?style=flat-square" alt="Modules"/></a>
+  <a href="#output"><img src="https://img.shields.io/badge/Output-SARIF%20%7C%20Markdown%20%7C%20HTML-green?style=flat-square" alt="Output"/></a>
+</p>
 
 ---
 
-## What it tests
+> ⚠️ **Authorized use only.** Run PasskeyPwn only against systems you own or are explicitly permitted to test (your own apps, a lab, or an in-scope bug-bounty target). WebAuthn is a defensive technology; this tool exists to help you verify your own relying-party implementation. You are responsible for how you use it.
 
-A compliant relying party must verify every WebAuthn response it receives. PasskeyPwn submits ceremonies with exactly one field mutated and reports a **finding** when the server *accepts* something it should have *rejected*.
+---
+
+## ✨ Highlights
+
+- 🕵️ **Shadow authenticator** — full override of `navigator.credentials.create/get`; every byte of `authenticatorData`, `clientDataJSON`, attestation object and signature is built & signed in Node.
+- 🔁 **Capture-replay (`--mode replay`)** — captures one real ceremony (options + finish HTTP calls incl. cookies/CSRF), then for each mutation **rebuilds & re-signs** and replays the finish request over HTTP.
+- 🎯 **Target-agnostic** — a structural field locator finds `clientDataJSON` / `authenticatorData` / `signature` / `credentialId` inside *any* JSON envelope.
+- 🧬 **12+ mutation modules** covering origin, challenge, counter, flags, attestation, credential binding, rpId scoping, BE/BS, clientDataJSON edge cases.
+- 📄 **Reports** in SARIF, Markdown and HTML, with PoC `curl` commands.
+
+---
+
+## Modules
 
 ### `fuzz` — per-field validation (ceremony conformance)
 
@@ -21,7 +48,14 @@ A compliant relying party must verify every WebAuthn response it receives. Passk
 | `counter` | signature counter regressed to 0 | flags cloned authenticator (§7.2 step 21) |
 | `flags` | UV bit cleared while UV was required | rejects (§7.2 step 17) |
 | `attestation` | `"none"` attestation where attestation was requested | validates, not accepts |
+| `attestation-packed` | packed attestation with bad signature | rejects |
 | `credid` | assertion from an unregistered credential ID | rejects (unknown credential) |
+| `rpid-scope` | rpId scope confusion (parent/foreign domain) | rejects (§7.2 step 15) |
+| `cdj-type` | wrong `clientDataJSON.type` | rejects (§7.2 step 11) |
+| `cdj-crossorigin` | `crossOrigin=true` | rejects (phishing resistance) |
+| `cdj-dupkey` | duplicate `challenge` key (parser confusion) | rejects |
+| `cdj-trailing` | trailing bytes after clientDataJSON | rejects |
+| `flags-backup` | invalid BE/BS combo (BS set, BE clear) | rejects (§6.1.3) |
 
 ### `exploit` — higher-level relying-party weaknesses
 
@@ -31,16 +65,18 @@ A compliant relying party must verify every WebAuthn response it receives. Passk
 | `rogue-persist` | lets a new credential be enrolled with no re-authentication (persistence vector) |
 | `downgrade` | accepts a credential enrolled without user verification when UV is required |
 | `recovery` | exposes a weaker non-passkey fallback that bypasses the passkey |
+| `cred-binding` | binds a credential to one account (cross-account reuse) |
 
-The `exploit` command **requires** an explicit `--authorized "<statement>"` flag, which is recorded in the results as an audit trail.
+The `exploit` command **requires** an explicit `--authorized "<statement>"` flag, recorded in results as an audit trail.
 
 ---
 
 ## How it works
 
-- **Shadow authenticator** — injects a full override of `navigator.credentials.create/get` so every byte of `authenticatorData`, `clientDataJSON`, the attestation object, and the signature is built and signed in Node (ES256 / P-256, DER-encoded as WebAuthn requires).
-- **Capture-replay (`--mode replay`)** — captures one real ceremony (the `options` + `finish` HTTP calls, with cookies/CSRF), then for each mutation rebuilds + **re-signs** the components and replays the `finish` request directly over HTTP. A structural **field locator** finds `clientDataJSON` / `authenticatorData` / `signature` / `credentialId` / `challenge` inside *any* JSON envelope by decoding and recognizing them — so replay is target-agnostic, not tied to one RP's field names.
+- **Shadow authenticator** — injects a full override of `navigator.credentials.create/get` so every byte of `authenticatorData`, `clientDataJSON`, the attestation object, and the signature is built and signed in Node (ES256 / RS256 / EdDSA).
+- **Capture-replay (`--mode replay`)** — captures one real ceremony (the `options` + `finish` HTTP calls, with cookies/CSRF), then for each mutation rebuilds + **re-signs** the components and replays the `finish` request directly over HTTP. A structural **field locator** finds the WebAuthn fields inside *any* JSON envelope by decoding and recognizing them — so replay is target-agnostic.
 - **Browser mode (`--mode browser`)** — drives the mutation through the live page for cases that are not replayable (e.g. registration-time attestation).
+- **HAR import (`--from-har`)** — replay from a captured HAR/Burp export instead of driving the browser.
 
 ---
 
@@ -69,13 +105,14 @@ npx tsx src/cli.ts fuzz \
 
 # 3. Exploit — higher-level weakness probes (authorization required)
 npx tsx src/cli.ts exploit \
-  --module "enum,rogue-persist,downgrade,recovery" \
+  --module "enum,rogue-persist,downgrade,recovery,cred-binding" \
   --authorized "I am authorized to test target.example under program XYZ" \
   --baseline ./baseline.json --out ./results
 
-# 4. Report — render findings as Markdown or SARIF
+# 4. Report — render findings as Markdown, SARIF or HTML
 npx tsx src/cli.ts report --format md   --results ./results --out report.md
 npx tsx src/cli.ts report --format sarif --results ./results --out report.sarif
+npx tsx src/cli.ts report --format html  --results ./results --out report.html
 ```
 
 Global options: `--proxy http://127.0.0.1:8080` (route through Burp), `--no-headless` (watch the browser), `--screenshots <dir>` (evidence capture).
@@ -86,9 +123,7 @@ Global options: `--proxy http://127.0.0.1:8080` (route through Burp), `--no-head
 
 ## Output
 
-Reports include a severity summary, a **full test matrix** (every case + verdict + the server's response), and detailed findings with rule IDs, categories, payloads, and HTTP evidence. SARIF output drops into CI / code-scanning dashboards.
-
-![Example report](demo-vuln/screenshots/08-report.png)
+Reports include a severity summary, a **full test matrix** (every case + verdict + the server's response), and detailed findings with rule IDs, categories, payloads, and HTTP evidence. SARIF output drops into CI / code-scanning dashboards. PoC `curl` commands are printed for each finding.
 
 ---
 
@@ -117,15 +152,16 @@ src/
   cli-commands/              recon | fuzz | exploit | report
   core/
     cbor-builder.ts          authenticatorData / clientDataJSON / attestationObject / COSE (canonical CBOR)
-    signer.ts                ES256 keygen + DER signing
+    signer.ts                ES256 / RS256 / EdDSA keygen + signing
     shadow-authenticator.ts  full navigator.credentials override
     baseline-authenticator.ts CDP virtual authenticator (recon only)
     cdp-session.ts           browser lifecycle, robust navigation, screenshots
     ceremony-runner.ts       drive a ceremony on a page, classify the verdict
     webauthn-locator.ts      structural WebAuthn-field locator (envelope-agnostic)
     replay.ts                capture-mutate-replay engine (cookie-jar aware)
+    har-import.ts            HAR/Burp export → ceremony transcript
   modules/                   recon | fuzz | exploit engines
-  reporting/                 SARIF + Markdown writers, shared results store
+  reporting/                 SARIF + Markdown + HTML writers, shared results store
 testbed/vulnerable-rp.ts     intentionally insecure RP for testing
 ```
 

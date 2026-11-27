@@ -12,6 +12,9 @@ export interface CDPSessionOptions {
   headless?: boolean;
   proxy?: string;
   slowMo?: number;
+  chromePath?: string;
+  channel?: string;
+  noSandbox?: boolean;
 }
 
 export interface CDPConnection {

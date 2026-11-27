@@ -147,6 +147,22 @@ const keyHint = {
  * Field names are used as a hint, but assignment is confirmed by structure so
  * that unusual envelopes still resolve correctly.
  */
+/**
+ * Return every credential-id field location (id / rawId / credentialId / keyId)
+ * in the envelope, so replay can replace ALL of them (not just the first).
+ */
+export function locateAllCredentialIds(body: unknown): Located[] {
+  const candidates: Candidate[] = [];
+  collectCandidates(body, [], '', candidates);
+  const out: Located[] = [];
+  for (const c of candidates) {
+    if (keyHint.credentialId.test(c.key)) {
+      out.push({ path: c.path, encoding: c.encoding });
+    }
+  }
+  return out;
+}
+
 export function locateWebAuthnFields(body: unknown): LocatedFields {
   const candidates: Candidate[] = [];
   collectCandidates(body, [], '', candidates);

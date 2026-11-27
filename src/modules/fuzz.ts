@@ -19,13 +19,14 @@ import { createCDPSession, closeCDPSession, captureScreenshot, CDPSessionOptions
 import { ShadowAuthenticator } from '../core/shadow-authenticator.js';
 import { FLAGS, toBase64Url } from '../core/cbor-builder.js';
 import { runRegister, runAuthenticate, CeremonyResult } from '../core/ceremony-runner.js';
-import { KeyPairES256 } from '../core/signer.js';
+import { KeyPairES256, AnyKeyPair } from '../core/signer.js';
 import {
   captureAuthTranscript,
   replayAssertion,
   AssertionOverrides,
   CeremonyTranscript,
 } from '../core/replay.js';
+import { loadHarTranscript } from '../core/har-import.js';
 import { CaseResult, RunResult, saveRunResult } from '../reporting/results-store.js';
 
 export type FuzzMode = 'browser' | 'replay';
@@ -39,6 +40,7 @@ export interface FuzzOptions {
   mode?: FuzzMode;
   screenshotDir?: string;
   sessionOptions?: CDPSessionOptions;
+  fromHar?: string;
 }
 
 interface Baseline {
@@ -66,7 +68,7 @@ interface MutationSpec {
   /** Whether this mutation can run via the HTTP replay engine. */
   replayable: boolean;
   /** Build the assertion overrides for replay mode (assertion-ceremony cases only). */
-  replayOverrides?: () => AssertionOverrides;
+  replayOverrides?: (b: Baseline) => AssertionOverrides;
 }
 
 const BOGUS_ORIGIN = 'https://passkeypwn-cross-origin.example';
@@ -112,6 +114,113 @@ const MUTATIONS: Record<string, MutationSpec> = {
     replayOverrides: () => ({ challenge: BOGUS_CHALLENGE }),
   },
 
+  'rpid-scope': {
+    id: 'fuzz.rpid.scope-confusion',
+    module: 'rpid-scope',
+    name: 'Assertion for a different rpId (scope confusion) accepted',
+    ceremony: 'authenticate',
+    category: 'rpid-scoping',
+    description:
+      'The assertion authenticatorData.rpIdHash was computed for a DIFFERENT rpId (parent/foreign domain). ' +
+      'A compliant RP MUST verify rpIdHash == SHA-256(own rpId) (WebAuthn §7.2 step 15).',
+    severity: 'error',
+    payload: 'authenticatorData.rpIdHash = SHA-256(<parent/foreign domain>)',
+    isApplicable: () => true,
+    apply: (shadow, b) => {
+      const rpId = b.analysis.rpId ?? '';
+      const labels = rpId.split('.');
+      const confused = labels.length >= 3 ? labels.slice(1).join('.') : `evil-${rpId}`;
+      shadow.setGetOverrides({ rpId: confused });
+    },
+    replayable: true,
+    replayOverrides: (b: Baseline) => {
+      const rpId = b.analysis.rpId ?? '';
+      const labels = rpId.split('.');
+      const confused = labels.length >= 3 ? labels.slice(1).join('.') : `evil-${rpId}`;
+      return { rpId: confused };
+    },
+  },
+
+  'cdj-type': {
+    id: 'fuzz.clientdata.type-confusion',
+    module: 'cdj-type',
+    name: 'Wrong clientDataJSON.type accepted',
+    ceremony: 'authenticate',
+    category: 'clientdata-validation',
+    description:
+      'clientDataJSON.type="webauthn.create" sent on an authenticate ceremony. RP MUST verify type matches ceremony (§7.2 step 11).',
+    severity: 'warning',
+    payload: 'clientDataJSON.type="webauthn.create"',
+    isApplicable: () => true,
+    apply: () => {},
+    replayable: true,
+    replayOverrides: () => ({ clientDataType: 'webauthn.create' }),
+  },
+
+  'cdj-crossorigin': {
+    id: 'fuzz.clientdata.cross-origin-true',
+    module: 'cdj-crossorigin',
+    name: 'clientDataJSON.crossOrigin=true accepted',
+    ceremony: 'authenticate',
+    category: 'clientdata-validation',
+    description:
+      'Assertion produced inside a cross-origin iframe (crossOrigin=true). RP SHOULD reject for phishing resistance.',
+    severity: 'note',
+    payload: 'clientDataJSON.crossOrigin=true',
+    isApplicable: () => true,
+    apply: () => {},
+    replayable: true,
+    replayOverrides: () => ({ crossOrigin: true }),
+  },
+
+  'cdj-dupkey': {
+    id: 'fuzz.clientdata.duplicate-challenge',
+    module: 'cdj-dupkey',
+    name: 'Duplicate clientDataJSON.challenge accepted (parser confusion)',
+    ceremony: 'authenticate',
+    category: 'clientdata-validation',
+    description:
+      'clientDataJSON contains two "challenge" members (real + attacker). Lax parser disagreement = smuggling vector.',
+    severity: 'warning',
+    payload: '{"challenge":"<real>","challenge":"<attacker>"}',
+    isApplicable: () => true,
+    apply: () => {},
+    replayable: true,
+    replayOverrides: () => ({ duplicateChallenge: BOGUS_CHALLENGE }),
+  },
+
+  'cdj-trailing': {
+    id: 'fuzz.clientdata.trailing-bytes',
+    module: 'cdj-trailing',
+    name: 'Trailing bytes after clientDataJSON accepted',
+    ceremony: 'authenticate',
+    category: 'clientdata-validation',
+    description:
+      'Raw bytes appended after the clientDataJSON document — lenient parser indicator.',
+    severity: 'note',
+    payload: 'clientDataJSON = <json> || <trailing bytes>',
+    isApplicable: () => true,
+    apply: () => {},
+    replayable: true,
+    replayOverrides: () => ({ trailingBytes: Buffer.from('/*passkeypwn*/') }),
+  },
+
+  'flags-backup': {
+    id: 'fuzz.flags.backup-state-invalid',
+    module: 'flags-backup',
+    name: 'Invalid backup flags (BS set, BE clear) accepted',
+    ceremony: 'authenticate',
+    category: 'flag-manipulation',
+    description:
+      'BS bit set while BE clear — spec-impossible combo (§6.1.3). RP tracking backup state MUST reject.',
+    severity: 'note',
+    payload: `flags=0x${(FLAGS.UP | FLAGS.UV | FLAGS.BS).toString(16).padStart(2, '0')} (UP|UV|BS, BE cleared)`,
+    isApplicable: () => true,
+    apply: (shadow) => shadow.setGetOverrides({ flags: FLAGS.UP | FLAGS.UV | FLAGS.BS }),
+    replayable: true,
+    replayOverrides: () => ({ flags: FLAGS.UP | FLAGS.UV | FLAGS.BS }),
+  },
+
   counter: {
     id: 'fuzz.counter.regression',
     module: 'counter',
@@ -123,11 +232,11 @@ const MUTATIONS: Record<string, MutationSpec> = {
       'An RP that stores signature counts SHOULD treat a non-increasing counter as a sign of a cloned authenticator ' +
       '(WebAuthn §7.2 step 21). Silent acceptance means cloned-credential detection is not in effect.',
     severity: 'warning',
-    payload: 'signCount=0 (regressed)',
+    payload: 'signCount=1 (regressed from 1000)',
     isApplicable: () => true,
-    apply: (shadow) => shadow.setGetOverrides({ signCount: 0 }),
+    apply: (shadow) => shadow.setGetOverrides({ signCount: 1 }),
     replayable: true,
-    replayOverrides: () => ({ signCount: 0 }),
+    replayOverrides: () => ({ signCount: 1 }),
   },
 
   flags: {
@@ -162,7 +271,25 @@ const MUTATIONS: Record<string, MutationSpec> = {
       b.analysis.attestationPreference !== null && b.analysis.attestationPreference !== 'none',
     apply: (shadow) =>
       shadow.setCreateOverrides({ attestationFmt: 'none', aaguid: Buffer.alloc(16) }),
-    replayable: false, // registration ceremony — rebuilding attestation objects is browser-driven for now
+    replayable: false,
+  },
+
+  'attestation-packed': {
+    id: 'fuzz.attestation.packed-bad-signature',
+    module: 'attestation-packed',
+    name: 'Packed attestation with invalid signature accepted',
+    ceremony: 'register',
+    category: 'attestation-bypass',
+    description:
+      'Registration completed with fmt="packed" self-attestation whose signature is computed over tampered authData. ' +
+      'RP MUST verify the attestation signature against the embedded public key (WebAuthn §7.1 step 20).',
+    severity: 'error',
+    payload: 'attestationObject fmt="packed", sig=sign(tampered authData)',
+    isApplicable: (b) =>
+      b.analysis.attestationPreference !== null && b.analysis.attestationPreference !== 'none',
+    apply: (shadow) =>
+      shadow.setCreateOverrides({ attestationFmt: 'packed', selfAttestation: true, aaguid: Buffer.alloc(16) }),
+    replayable: false,
   },
 
   credid: {
@@ -291,7 +418,7 @@ function finalize(
 
 interface ReplayContext {
   transcript: CeremonyTranscript;
-  keyPair: KeyPairES256;
+  keyPair: AnyKeyPair;
   credentialId: Buffer;
 }
 
@@ -350,8 +477,9 @@ async function runReplayCase(
   replay: ReplayContext,
   baseline: Baseline,
 ): Promise<CaseResult> {
-  const overrides: AssertionOverrides = spec.replayOverrides ? spec.replayOverrides() : {};
+  const overrides: AssertionOverrides = spec.replayOverrides ? spec.replayOverrides(baseline) : {};
   const res = await replayAssertion(replay.transcript, replay.keyPair, replay.credentialId, overrides);
+  (res as any).__poc = res.request;
 
   const applicable = spec.isApplicable(baseline);
   const isFinding = applicable && res.classification === 'ACCEPTED';
@@ -370,6 +498,7 @@ async function runReplayCase(
     responseExcerpt: excerpt(res.body),
     payload: spec.payload,
     endpoint: replay.transcript.finishRequest.url,
+    poc: res.request as any,
   };
 }
 
@@ -410,7 +539,11 @@ export async function runFuzz(opts: FuzzOptions): Promise<RunResult> {
     if (needsReplay) {
       console.log('[fuzz] 🧵 Capturing one authentication transcript for replay...');
       try {
-        replay = await setupReplay(baseline, urlRegister, urlLogin, opts.sessionOptions, opts.screenshotDir);
+        if (opts.fromHar) {
+          replay = { transcript: loadHarTranscript(opts.fromHar), keyPair: (await import('../core/signer.js')).generateES256KeyPair(), credentialId: Buffer.alloc(32) };
+        } else {
+          replay = await setupReplay(baseline, urlRegister, urlLogin, opts.sessionOptions, opts.screenshotDir);
+        }
         console.log(`[fuzz]   ✅ Transcript captured (finish: ${replay.transcript.finishRequest.url})`);
       } catch (err) {
         console.log(

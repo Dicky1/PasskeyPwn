@@ -24,6 +24,7 @@ export interface SarifFinding {
   responseExcerpt?: string;
   payload?: string;
   category: string;
+  poc?: { url: string; method: string; headers: Record<string, string>; body: string | null };
   helpUri?: string;
 }
 

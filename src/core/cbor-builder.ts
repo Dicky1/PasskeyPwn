@@ -107,27 +107,34 @@ export function buildAuthenticatorData(opts: AuthenticatorDataOptions): Buffer {
  * This is what the browser normally constructs.
  */
 export function buildClientDataJSON(opts: {
-  type: 'webauthn.create' | 'webauthn.get';
-  challenge: string;          // base64url-encoded challenge from server
-  origin: string;             // e.g., "https://webauthn.io"
+  type: string;
+  challenge: string;
+  origin: string;
   crossOrigin?: boolean;
   tokenBinding?: { status: string; id?: string };
+  duplicateChallenge?: string;
+  trailingBytes?: Buffer;
 }): Buffer {
-  const obj: Record<string, unknown> = {
-    type: opts.type,
-    challenge: opts.challenge,
-    origin: opts.origin,
-  };
+  let jsonStr: string;
 
-  if (opts.crossOrigin !== undefined) {
-    obj.crossOrigin = opts.crossOrigin;
+  if (opts.duplicateChallenge !== undefined) {
+    const parts = [
+      `"type":${JSON.stringify(opts.type)}`,
+      `"challenge":${JSON.stringify(opts.challenge)}`,
+      `"challenge":${JSON.stringify(opts.duplicateChallenge)}`,
+      `"origin":${JSON.stringify(opts.origin)}`,
+    ];
+    if (opts.crossOrigin !== undefined) parts.push(`"crossOrigin":${opts.crossOrigin}`);
+    jsonStr = `{${parts.join(',')}}`;
+  } else {
+    const obj: Record<string, unknown> = { type: opts.type, challenge: opts.challenge, origin: opts.origin };
+    if (opts.crossOrigin !== undefined) obj.crossOrigin = opts.crossOrigin;
+    if (opts.tokenBinding) obj.tokenBinding = opts.tokenBinding;
+    jsonStr = JSON.stringify(obj);
   }
 
-  if (opts.tokenBinding) {
-    obj.tokenBinding = opts.tokenBinding;
-  }
-
-  return Buffer.from(JSON.stringify(obj), 'utf-8');
+  const jsonBuf = Buffer.from(jsonStr, 'utf-8');
+  return opts.trailingBytes ? Buffer.concat([jsonBuf, opts.trailingBytes]) : jsonBuf;
 }
 
 /**
@@ -170,6 +177,32 @@ export function buildCoseES256PublicKey(x: Buffer, y: Buffer): Buffer {
   coseKey.set(-2, x);    // x coordinate
   coseKey.set(-3, y);    // y coordinate
 
+  return Buffer.from(cborEncode(coseKey));
+}
+
+/**
+ * COSE key for RS256 (RSA, alg -257). kty=3 (RSA), alg=-257.
+ * n and e are the RSA modulus and exponent.
+ */
+export function buildCoseRS256PublicKey(n: Buffer, e: Buffer): Buffer {
+  const coseKey = new Map<number, number | Buffer>();
+  coseKey.set(1, 3);      // kty: RSA
+  coseKey.set(3, -257);   // alg: RS256
+  coseKey.set(-1, n);     // n
+  coseKey.set(-2, e);     // e
+  return Buffer.from(cborEncode(coseKey));
+}
+
+/**
+ * COSE key for EdDSA (Ed25519, alg -8). kty=1 (OKP), alg=-8, crv=6 (Ed25519).
+ */
+export function buildCoseEdDSAPublicKey(x: Buffer): Buffer {
+  if (x.length !== 32) throw new Error('Ed25519 public key must be 32 bytes');
+  const coseKey = new Map<number, number | Buffer>();
+  coseKey.set(1, 1);      // kty: OKP
+  coseKey.set(3, -8);     // alg: EdDSA
+  coseKey.set(-1, 6);     // crv: Ed25519
+  coseKey.set(-2, x);     // x
   return Buffer.from(cborEncode(coseKey));
 }
 

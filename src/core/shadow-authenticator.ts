@@ -22,13 +22,23 @@ import {
   buildClientDataJSON,
   buildAttestationObject,
   buildCoseES256PublicKey,
+  buildCoseRS256PublicKey,
+  buildCoseEdDSAPublicKey,
   FLAGS,
+  sha256,
 } from './cbor-builder.js';
 import {
   generateES256KeyPair,
+  generateRS256KeyPair,
+  generateEdDSAKeyPair,
   signAssertion,
   signAttestation,
+  signRS256,
+  signEdDSA,
   KeyPairES256,
+  KeyPairRS256,
+  KeyPairEdDSA,
+  AnyKeyPair,
 } from './signer.js';
 import { randomBytes } from 'node:crypto';
 
@@ -46,32 +56,25 @@ function toChallengeB64Url(input: string): string {
 export interface ShadowCredential {
   credentialId: Buffer;
   rpId: string;
-  keyPair: KeyPairES256;
+  keyPair: AnyKeyPair;
+  alg: 'ES256' | 'RS256' | 'EdDSA';
   signCount: number;
   userHandle?: Buffer;
 }
 
 export interface ShadowCreateOverrides {
-  /** Override rpId (for rpIdHash computation) */
   rpId?: string;
-  /** Override rpIdHash directly (32 bytes) */
   rpIdHash?: Buffer;
-  /** Override origin in clientDataJSON */
   origin?: string;
-  /** Override flags byte */
   flags?: number;
-  /** Override signCount */
   signCount?: number;
-  /** Override AAGUID (16 bytes) */
   aaguid?: Buffer;
-  /** Override credential ID */
   credentialId?: Buffer;
-  /** Override challenge in clientDataJSON (base64url) */
   challenge?: string;
-  /** Attestation format */
   attestationFmt?: 'none' | 'packed';
-  /** Include self-attestation signature */
   selfAttestation?: boolean;
+  /** Algorithm to use for the credential (default ES256). */
+  alg?: 'ES256' | 'RS256' | 'EdDSA';
 }
 
 export interface ShadowGetOverrides {
@@ -101,6 +104,8 @@ export interface ShadowGetOverrides {
  * the pre-built response buffers.
  */
 export class ShadowAuthenticator {
+  /** Real page origin (e.g. https://localhost:8099). Used as default clientDataJSON.origin. */
+  pageOrigin: string | null = null;
   private credentials: ShadowCredential[] = [];
   private createOverrides: ShadowCreateOverrides = {};
   private getOverrides: ShadowGetOverrides = {};
@@ -116,15 +121,19 @@ export class ShadowAuthenticator {
   /**
    * Generate a new credential with a fresh ES256 key pair.
    */
-  generateCredential(rpId: string, userHandle?: Buffer): ShadowCredential {
-    const keyPair = generateES256KeyPair();
+  generateCredential(rpId: string, userHandle?: Buffer, alg: 'ES256' | 'RS256' | 'EdDSA' = 'ES256'): ShadowCredential {
+    let keyPair: AnyKeyPair;
+    if (alg === 'RS256') keyPair = generateRS256KeyPair();
+    else if (alg === 'EdDSA') keyPair = generateEdDSAKeyPair();
+    else keyPair = generateES256KeyPair();
     const credentialId = randomBytes(32);
 
     const cred: ShadowCredential = {
       credentialId,
       rpId,
       keyPair,
-      signCount: 0,
+      alg,
+      signCount: 1000,
       userHandle,
     };
 
@@ -159,6 +168,7 @@ export class ShadowAuthenticator {
    * This exposes callback functions and injects the override script.
    */
   async install(page: Page): Promise<void> {
+    try { this.pageOrigin = new URL(page.url()).origin; } catch { /* keep default */ }
     // Expose Node.js callbacks to the browser
     await page.exposeFunction('__ppwn_shadowCreate', async (optionsJson: string) => {
       return this.handleCreate(optionsJson);
@@ -278,24 +288,38 @@ export class ShadowAuthenticator {
 
     // Determine rpId
     const rpId = ov.rpId ?? options.rp?.id ?? new URL(`https://${options.rp?.name ?? 'localhost'}`).hostname;
-    const origin = ov.origin ?? `https://${rpId}`;
+    const origin = ov.origin ?? this.pageOrigin ?? `https://${rpId}`;
     const challenge = toChallengeB64Url(ov.challenge ?? options.challenge);
 
-    // Generate or use existing credential
+    const alg = ov.alg ?? 'ES256';
     let cred: ShadowCredential;
-    if (this.credentials.length > 0 && !ov.credentialId) {
+    if (this.credentials.length > 0 && !ov.credentialId && !ov.alg) {
       cred = this.credentials[this.credentials.length - 1]!;
     } else {
-      cred = this.generateCredential(rpId);
+      cred = this.generateCredential(rpId, undefined, alg);
     }
 
     const credentialId = ov.credentialId ?? cred.credentialId;
     const signCount = ov.signCount ?? cred.signCount;
     const flags = ov.flags ?? (FLAGS.UP | FLAGS.UV | FLAGS.AT);
-    const aaguid = ov.aaguid ?? Buffer.alloc(16); // zero AAGUID for "none" attestation
+    const aaguid = ov.aaguid ?? Buffer.alloc(16);
 
-    // Build COSE public key
-    const cosePublicKey = buildCoseES256PublicKey(cred.keyPair.x, cred.keyPair.y);
+    // Build COSE public key based on alg
+    let cosePublicKey: Buffer;
+    let publicKeyAlgorithm: number;
+    if (cred.alg === 'RS256') {
+      const r = cred.keyPair as KeyPairRS256;
+      cosePublicKey = buildCoseRS256PublicKey(r.n, r.e);
+      publicKeyAlgorithm = -257;
+    } else if (cred.alg === 'EdDSA') {
+      const e = cred.keyPair as KeyPairEdDSA;
+      cosePublicKey = buildCoseEdDSAPublicKey(e.publicKeyRaw);
+      publicKeyAlgorithm = -8;
+    } else {
+      const es = cred.keyPair as KeyPairES256;
+      cosePublicKey = buildCoseES256PublicKey(es.x, es.y);
+      publicKeyAlgorithm = -7;
+    }
 
     // Build authenticatorData
     const authData = buildAuthenticatorData({
@@ -322,9 +346,11 @@ export class ShadowAuthenticator {
     let attStmt: Record<string, unknown> = {};
 
     if (fmt === 'packed' && ov.selfAttestation) {
-      // Self-attestation: sign with the credential key
-      const sig = signAttestation(cred.keyPair, authData, clientDataJSON);
-      attStmt = { alg: -7, sig };
+      let sig: Buffer;
+      if (cred.alg === 'RS256') sig = signRS256((cred.keyPair as KeyPairRS256).privateKey, Buffer.concat([authData, sha256(clientDataJSON)]));
+      else if (cred.alg === 'EdDSA') sig = signEdDSA((cred.keyPair as KeyPairEdDSA).privateKey, Buffer.concat([authData, sha256(clientDataJSON)]));
+      else sig = signAttestation(cred.keyPair as KeyPairES256, authData, clientDataJSON);
+      attStmt = { alg: publicKeyAlgorithm, sig };
     }
 
     const attestationObject = buildAttestationObject({
@@ -345,7 +371,7 @@ export class ShadowAuthenticator {
       clientDataJSON: clientDataJSON.toString('base64'),
       attestationObject: attestationObject.toString('base64'),
       publicKey: cosePublicKey.toString('base64'),
-      publicKeyAlgorithm: -7,
+      publicKeyAlgorithm,
       authenticatorData: authData.toString('base64'),
     });
   }
@@ -365,7 +391,7 @@ export class ShadowAuthenticator {
     const cred = this.credentials[credIndex]!;
 
     const rpId = ov.rpId ?? options.rpId ?? cred.rpId;
-    const origin = ov.origin ?? `https://${rpId}`;
+    const origin = ov.origin ?? this.pageOrigin ?? `https://${rpId}`;
     const challenge = toChallengeB64Url(ov.challenge ?? options.challenge);
     const signCount = ov.signCount ?? cred.signCount;
     const flags = ov.flags ?? (FLAGS.UP | FLAGS.UV);
@@ -385,8 +411,17 @@ export class ShadowAuthenticator {
       origin,
     });
 
-    // Sign the assertion
-    const signature = signAssertion(cred.keyPair, authData, clientDataJSON);
+    // Sign the assertion based on alg
+    let signature: Buffer;
+    if (cred.alg === 'RS256') {
+      const r = cred.keyPair as KeyPairRS256;
+      signature = signRS256(r.privateKey, Buffer.concat([authData, sha256(clientDataJSON)]));
+    } else if (cred.alg === 'EdDSA') {
+      const e = cred.keyPair as KeyPairEdDSA;
+      signature = signEdDSA(e.privateKey, Buffer.concat([authData, sha256(clientDataJSON)]));
+    } else {
+      signature = signAssertion(cred.keyPair as KeyPairES256, authData, clientDataJSON);
+    }
 
     // Update signCount
     cred.signCount = signCount + 1;

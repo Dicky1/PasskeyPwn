@@ -185,8 +185,9 @@ export async function runRecon(opts: ReconOptions): Promise<BaselineReport> {
     // ─── PHASE 1a: REGISTRATION ───
     console.log(`[recon] 📝 Phase 1a: Registration`);
 
-    // Intercept WebAuthn API calls to capture the options
-    const registrationCapture = await interceptRegistration(page);
+    // Arm the interceptor BEFORE navigation (do NOT await — it resolves only
+    // after the ceremony completes). Awaiting here would block 30s before nav.
+    const registrationCapture = interceptRegistration(page);
 
     // Navigate to registration page
     await gotoSettled(page, opts.urlRegister);
@@ -237,7 +238,8 @@ export async function runRecon(opts: ReconOptions): Promise<BaselineReport> {
     // ─── PHASE 1b: AUTHENTICATION ───
     console.log(`[recon] 🔑 Phase 1b: Authentication`);
 
-    const authCapture = await interceptAuthentication(page);
+    // Arm the interceptor BEFORE navigation (do NOT await).
+    const authCapture = interceptAuthentication(page);
 
     // Navigate to login page
     await gotoSettled(page, opts.urlLogin);
